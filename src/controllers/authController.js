@@ -3,12 +3,28 @@ import bcrypt from 'bcryptjs';
 import { User } from '../models/User.js';
 import { AUTH_COOKIE_NAME } from '../middleware/authMiddleware.js';
 
-function setAuthCookie(res, token) {
-  const isProd = process.env.NODE_ENV === 'production';
+function isSecureContext(req) {
+  if (process.env.NODE_ENV === 'production' || process.env.RENDER === 'true' || Boolean(process.env.RENDER_EXTERNAL_URL)) {
+    return true;
+  }
+  if (req) {
+    if (req.secure || req.headers?.['x-forwarded-proto'] === 'https') {
+      return true;
+    }
+    const origin = req.headers?.origin || req.headers?.referer;
+    if (origin && origin.startsWith('https://')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function setAuthCookie(res, token, req) {
+  const isSecure = isSecureContext(req);
   res.cookie(AUTH_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
+    secure: isSecure,
+    sameSite: isSecure ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
   });
@@ -49,11 +65,12 @@ export async function register(req, res, next) {
     });
 
     const token = generateToken(user._id.toString());
-    setAuthCookie(res, token);
+    setAuthCookie(res, token, req);
 
     return res.status(201).json({
       message: 'Account created successfully',
       user: user.toSafeObject(),
+      token,
     });
   } catch (error) {
     next(error);
@@ -80,11 +97,12 @@ export async function login(req, res, next) {
     }
 
     const token = generateToken(user._id.toString());
-    setAuthCookie(res, token);
+    setAuthCookie(res, token, req);
 
     return res.status(200).json({
       message: 'Logged in successfully',
       user: user.toSafeObject(),
+      token,
     });
   } catch (error) {
     next(error);
@@ -92,11 +110,11 @@ export async function login(req, res, next) {
 }
 
 export async function logout(req, res) {
-  const isProd = process.env.NODE_ENV === 'production';
+  const isSecure = isSecureContext(req);
   res.clearCookie(AUTH_COOKIE_NAME, {
     httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
+    secure: isSecure,
+    sameSite: isSecure ? 'none' : 'lax',
     path: '/',
   });
   return res.status(200).json({ message: 'Logged out successfully.' });

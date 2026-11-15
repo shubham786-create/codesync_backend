@@ -46,6 +46,20 @@ export const mongoYjsPersistence = {
       return;
     }
 
+    // Attach debounced auto-save listener IMMEDIATELY so no incoming edits are missed
+    ydoc.on('update', () => {
+      if (debounceTimers.has(docName)) {
+        clearTimeout(debounceTimers.get(docName));
+      }
+      debounceTimers.set(
+        docName,
+        setTimeout(() => {
+          debounceTimers.delete(docName);
+          mongoYjsPersistence.writeState(docName, ydoc);
+        }, 800)
+      );
+    });
+
     try {
       // 1. Try to load existing binary CRDT state
       const collabDoc = await CollaborativeDocument.findOne({ fileId });
@@ -81,20 +95,6 @@ export const mongoYjsPersistence = {
     } catch (err) {
       console.error(`[Yjs Persistence] bindState error for ${docName}:`, err.message);
     }
-
-    // Attach debounced auto-save listener on every doc update (ALWAYS attached)
-    ydoc.on('update', () => {
-      if (debounceTimers.has(docName)) {
-        clearTimeout(debounceTimers.get(docName));
-      }
-      debounceTimers.set(
-        docName,
-        setTimeout(() => {
-          debounceTimers.delete(docName);
-          mongoYjsPersistence.writeState(docName, ydoc);
-        }, 800)
-      );
-    });
   },
 
   /**
@@ -103,6 +103,11 @@ export const mongoYjsPersistence = {
   async writeState(docName, ydoc) {
     const { workspaceId, fileId } = parseDocName(docName);
     if (!fileId) return;
+
+    if (debounceTimers.has(docName)) {
+      clearTimeout(debounceTimers.get(docName));
+      debounceTimers.delete(docName);
+    }
 
     // Check if mongoose is currently connected
     if (mongoose.connection.readyState !== 1) {
@@ -129,6 +134,7 @@ export const mongoYjsPersistence = {
           content: plainText,
         }),
       ]);
+      console.log(`[Yjs Persistence] Successfully persisted ${docName} (length: ${plainText.length})`);
     } catch (err) {
       console.error(`[Yjs Persistence] writeState error for ${docName}:`, err.message);
     }

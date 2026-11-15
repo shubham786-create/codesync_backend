@@ -56,26 +56,25 @@ export function useYjsMonaco({
     ydocRef.current = ydoc;
 
     // 2. Determine WebSocket URL
-    const backendUrl = import.meta.env.VITE_BACKEND_URL;
+    const apiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
     let wsUrl;
-    if (backendUrl) {
-      const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:';
-      const cleanHost = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (apiUrl) {
+      const wsProtocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
+      const cleanHost = apiUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
       wsUrl = `${wsProtocol}//${cleanHost}/yjs`;
-    } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      // Direct connection to port 5000 in dev
-      wsUrl = `ws://${window.location.hostname}:5000/yjs`;
     } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       wsUrl = `${protocol}//${window.location.host}/yjs`;
     }
 
     const roomName = `${workspaceId}:${activeFileId}`;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('codesync_token') : null;
 
     // 3. Connect WebsocketProvider
     const provider = new WebsocketProvider(wsUrl, roomName, ydoc, {
       connect: true,
       maxBackoffTime: 5000,
+      params: token ? { token } : {},
     });
     providerRef.current = provider;
 

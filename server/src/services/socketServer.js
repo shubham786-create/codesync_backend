@@ -19,9 +19,16 @@ function sanitizeText(str) {
 }
 
 export function initSocketServer(httpServer) {
+  const allowedOrigins = [
+    process.env.CLIENT_ORIGIN,
+    'https://codesyncfrontend1.vercel.app',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ].filter(Boolean);
+
   const io = new Server(httpServer, {
     cors: {
-      origin: [process.env.CLIENT_ORIGIN || 'http://localhost:5173', 'http://127.0.0.1:5173'],
+      origin: allowedOrigins,
       credentials: true,
     },
     pingTimeout: 60000,

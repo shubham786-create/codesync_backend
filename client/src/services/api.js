@@ -1,14 +1,9 @@
 import axios from 'axios';
 
-const backendUrl = import.meta.env.VITE_BACKEND_URL;
+const apiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
 let baseURL = '/api';
-if (backendUrl) {
-  baseURL = `${backendUrl.replace(/\/$/, '')}/api`;
-} else if (
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-) {
-  baseURL = `http://${window.location.hostname}:5000/api`;
+if (apiUrl) {
+  baseURL = `${apiUrl.replace(/\/$/, '')}/api`;
 }
 
 const api = axios.create({
@@ -17,6 +12,16 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('codesync_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
 });
 
 api.interceptors.response.use(

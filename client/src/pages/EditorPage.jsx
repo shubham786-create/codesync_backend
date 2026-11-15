@@ -80,6 +80,36 @@ export default function EditorPage() {
   const monacoInstanceRef = useRef(null);
   const iframeRef = useRef(null);
 
+  // Memoized handlers to avoid re-triggering hooks or re-renders
+  const handleRemoteUsersChange = useCallback((remoteUsers) => {
+    if (Array.isArray(remoteUsers) && remoteUsers.length > 0) {
+      setOnlineUsers((prev) => {
+        if (
+          prev.length === remoteUsers.length &&
+          prev.every((u, i) => u.clientId === remoteUsers[i].clientId && u.name === remoteUsers[i].name)
+        ) {
+          return prev;
+        }
+        return remoteUsers;
+      });
+    }
+  }, []);
+
+  const handleEditorMount = useCallback((editor, monaco) => {
+    editorInstanceRef.current = editor;
+    monacoInstanceRef.current = monaco;
+    setEditorInstance(editor);
+  }, []);
+
+  const handleCursorChange = useCallback((pos) => {
+    setCursorPos((prev) => {
+      if (prev.line === pos.line && prev.col === pos.col) {
+        return prev; // Identical position, bail out to avoid re-render
+      }
+      return pos;
+    });
+  }, []);
+
   // Yjs Real-Time CRDT Collaboration Hook
   const { synced: isYjsSynced, connecting: isYjsConnecting } = useYjsMonaco({
     workspaceId,
@@ -87,11 +117,7 @@ export default function EditorPage() {
     editor: editorInstance,
     user,
     userRole: workspace?.role,
-    onRemoteUsersChange: (remoteUsers) => {
-      if (remoteUsers && remoteUsers.length > 0) {
-        setOnlineUsers(remoteUsers);
-      }
-    },
+    onRemoteUsersChange: handleRemoteUsersChange,
   });
 
   // Active file object
@@ -100,13 +126,17 @@ export default function EditorPage() {
   // Handle Run Preview
   const handleRunPreview = useCallback(() => {
     try {
-      const currentEditorValue = editorInstanceRef.current
-        ? editorInstanceRef.current.getValue()
-        : null;
-
+      const monaco = monacoInstanceRef.current;
       const updatedFiles = files.map((f) => {
-        if ((f.id || f._id) === activeFileId && currentEditorValue !== null) {
-          return { ...f, content: currentEditorValue };
+        const fId = f.id || f._id;
+        if (fId === activeFileId && editorInstanceRef.current) {
+          return { ...f, content: editorInstanceRef.current.getValue() };
+        }
+        if (monaco) {
+          const model = monaco.editor.getModels().find((m) => m.uri.toString().includes(fId));
+          if (model && !model.isDisposed()) {
+            return { ...f, content: model.getValue() };
+          }
         }
         return f;
       });
@@ -271,6 +301,17 @@ export default function EditorPage() {
   const handleSelectFile = async (file) => {
     const fileId = file.id || file._id;
     if (file.type === 'folder') return;
+
+    // Persist current editor value before switching active tab
+    if (activeFileId && editorInstanceRef.current) {
+      const curVal = editorInstanceRef.current.getValue();
+      setFiles((prev) =>
+        prev.map((f) => ((f.id || f._id) === activeFileId ? { ...f, content: curVal } : f))
+      );
+      setOpenFiles((prev) =>
+        prev.map((f) => ((f.id || f._id) === activeFileId ? { ...f, content: curVal } : f))
+      );
+    }
 
     // Check if full content is loaded
     let targetFile = files.find((f) => (f.id || f._id) === fileId);
@@ -445,7 +486,7 @@ export default function EditorPage() {
   };
 
   // Manual save trigger (Ctrl+S)
-  const handleManualSave = async () => {
+  const handleManualSave = useCallback(async () => {
     if (!activeFileId || !activeFile) return;
     setSaveStatus('saving');
     try {
@@ -466,7 +507,7 @@ export default function EditorPage() {
       setSaveStatus('offline');
       toast.error('Save failed');
     }
-  };
+  }, [workspaceId, activeFileId, activeFile]);
 
   const isReadOnly = workspace?.role === 'viewer';
 
@@ -647,17 +688,12 @@ export default function EditorPage() {
           <div className="flex-1 relative overflow-hidden">
             {activeFile ? (
               <CodeEditor
-                key={activeFileId}
-                path={activeFile.path || activeFile.name}
+                path={`codesync://${workspaceId}/${activeFileId}/${activeFile.name}`}
                 defaultValue={activeFile.content || ''}
                 language={activeFile.extension || 'javascript'}
                 onSave={handleManualSave}
-                onCursorChange={setCursorPos}
-                onEditorMount={(editor, monaco) => {
-                  editorInstanceRef.current = editor;
-                  monacoInstanceRef.current = monaco;
-                  setEditorInstance(editor);
-                }}
+                onCursorChange={handleCursorChange}
+                onEditorMount={handleEditorMount}
                 readOnly={isReadOnly}
                 fontSize={fontSize}
                 wordWrap={wordWrap}
@@ -674,7 +710,15 @@ export default function EditorPage() {
           <EditorStatusBar
             cursorPosition={cursorPos}
             language={activeFile?.extension || 'javascript'}
-            connectionStatus={saveStatus === 'saved' ? 'connected' : saveStatus}
+            connectionStatus={
+              saveStatus === 'saved'
+                ? isYjsSynced
+                  ? 'connected'
+                  : isYjsConnecting
+                  ? 'syncing'
+                  : 'connected'
+                : saveStatus
+            }
             readOnly={isReadOnly}
             wordWrap={wordWrap}
             onToggleWordWrap={() => setWordWrap((w) => (w === 'on' ? 'off' : 'on'))}

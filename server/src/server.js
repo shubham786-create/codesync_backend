@@ -14,10 +14,11 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { initYjsServer } from './services/yjsServer.js';
 import { initSocketServer } from './services/socketServer.js';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config(); // fallback to root if present
+
 const clientDistPath = path.resolve(__dirname, '../../client/dist');
 
 const app = express();

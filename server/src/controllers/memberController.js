@@ -93,18 +93,29 @@ export async function acceptInvitation(req, res, next) {
       return res.status(404).json({ error: 'The workspace associated with this invitation no longer exists.' });
     }
 
-    // Check if already a member
+    // Check if already a member or create safely
     let member = await WorkspaceMember.findOne({
       workspaceId: workspace._id,
       userId,
     });
 
     if (!member) {
-      member = await WorkspaceMember.create({
-        workspaceId: workspace._id,
-        userId,
-        role: invitation.role,
-      });
+      try {
+        member = await WorkspaceMember.create({
+          workspaceId: workspace._id,
+          userId,
+          role: invitation.role,
+        });
+      } catch (err) {
+        if (err.code === 11000) {
+          member = await WorkspaceMember.findOne({
+            workspaceId: workspace._id,
+            userId,
+          });
+        } else {
+          throw err;
+        }
+      }
     }
 
     res.status(200).json({

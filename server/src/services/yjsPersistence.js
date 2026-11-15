@@ -46,44 +46,7 @@ export const mongoYjsPersistence = {
       return;
     }
 
-    try {
-      // 1. Try to load existing binary CRDT state
-      const collabDoc = await CollaborativeDocument.findOne({ fileId });
-      if (collabDoc && collabDoc.yjsState) {
-        Y.applyUpdate(ydoc, new Uint8Array(collabDoc.yjsState));
-        return;
-      }
-
-      // 2. Fallback: Seed from WorkspaceFile plain-text content
-      const file = await WorkspaceFile.findById(fileId);
-      if (file && typeof file.content === 'string') {
-        const ytext = ydoc.getText('monaco');
-        ydoc.transact(() => {
-          if (ytext.length === 0 && file.content.length > 0) {
-            ytext.insert(0, file.content);
-          }
-        });
-
-        // Save initial binary state
-        if (file.content.length > 0) {
-          const initialBinary = Buffer.from(Y.encodeStateAsUpdate(ydoc));
-          await CollaborativeDocument.findOneAndUpdate(
-            { fileId },
-            {
-              workspaceId: file.workspaceId,
-              fileId: file._id,
-              yjsState: initialBinary,
-              lastSavedAt: new Date(),
-            },
-            { upsert: true, new: true }
-          );
-        }
-      }
-    } catch (err) {
-      console.error(`[Yjs Persistence] bindState error for ${docName}:`, err.message);
-    }
-
-    // Attach debounced auto-save listener on every doc update
+    // Attach debounced auto-save listener IMMEDIATELY so no incoming edits are missed
     ydoc.on('update', () => {
       if (debounceTimers.has(docName)) {
         clearTimeout(debounceTimers.get(docName));
@@ -93,9 +56,45 @@ export const mongoYjsPersistence = {
         setTimeout(() => {
           debounceTimers.delete(docName);
           mongoYjsPersistence.writeState(docName, ydoc);
-        }, 1000)
+        }, 800)
       );
     });
+
+    try {
+      // 1. Try to load existing binary CRDT state
+      const collabDoc = await CollaborativeDocument.findOne({ fileId });
+      if (collabDoc && collabDoc.yjsState) {
+        Y.applyUpdate(ydoc, new Uint8Array(collabDoc.yjsState));
+      } else {
+        // 2. Fallback: Seed from WorkspaceFile plain-text content
+        const file = await WorkspaceFile.findById(fileId);
+        if (file && typeof file.content === 'string') {
+          const ytext = ydoc.getText('monaco');
+          ydoc.transact(() => {
+            if (ytext.length === 0 && file.content.length > 0) {
+              ytext.insert(0, file.content);
+            }
+          });
+
+          // Save initial binary state
+          if (file.content.length > 0) {
+            const initialBinary = Buffer.from(Y.encodeStateAsUpdate(ydoc));
+            await CollaborativeDocument.findOneAndUpdate(
+              { fileId },
+              {
+                workspaceId: file.workspaceId,
+                fileId: file._id,
+                yjsState: initialBinary,
+                lastSavedAt: new Date(),
+              },
+              { upsert: true, new: true }
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[Yjs Persistence] bindState error for ${docName}:`, err.message);
+    }
   },
 
   /**
@@ -104,6 +103,11 @@ export const mongoYjsPersistence = {
   async writeState(docName, ydoc) {
     const { workspaceId, fileId } = parseDocName(docName);
     if (!fileId) return;
+
+    if (debounceTimers.has(docName)) {
+      clearTimeout(debounceTimers.get(docName));
+      debounceTimers.delete(docName);
+    }
 
     // Check if mongoose is currently connected
     if (mongoose.connection.readyState !== 1) {
@@ -130,6 +134,7 @@ export const mongoYjsPersistence = {
           content: plainText,
         }),
       ]);
+      console.log(`[Yjs Persistence] Successfully persisted ${docName} (length: ${plainText.length})`);
     } catch (err) {
       console.error(`[Yjs Persistence] writeState error for ${docName}:`, err.message);
     }

@@ -18,6 +18,31 @@ export function useYjsMonaco({
   const providerRef = useRef(null);
   const bindingRef = useRef(null);
 
+  // Store volatile callbacks & state in refs to prevent reconnect/re-render loops
+  const onRemoteUsersChangeRef = useRef(onRemoteUsersChange);
+  const userRef = useRef(user);
+  const userRoleRef = useRef(userRole);
+
+  useEffect(() => {
+    onRemoteUsersChangeRef.current = onRemoteUsersChange;
+  }, [onRemoteUsersChange]);
+
+  useEffect(() => {
+    userRef.current = user;
+    userRoleRef.current = userRole;
+
+    // Dynamically update awareness without reconnecting WebSocket
+    if (providerRef.current?.awareness && user) {
+      const userColor = user.avatarColor || '#6366F1';
+      providerRef.current.awareness.setLocalStateField('user', {
+        name: user.name || 'Developer',
+        color: userColor,
+        colorLight: `${userColor}33`,
+        role: userRole || 'editor',
+      });
+    }
+  }, [user, userRole]);
+
   useEffect(() => {
     if (!workspaceId || !activeFileId || !editor) {
       return;
@@ -26,7 +51,7 @@ export function useYjsMonaco({
     setConnecting(true);
     setSynced(false);
 
-    // 1. Create fresh Y.Doc
+    // 1. Create fresh Y.Doc for this active file
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
 
@@ -38,12 +63,13 @@ export function useYjsMonaco({
       const cleanHost = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
       wsUrl = `${wsProtocol}//${cleanHost}/yjs`;
     } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      // Connect directly to backend port 5000 to eliminate Vite's dev-server WebSocket proxy errors
+      // Direct connection to port 5000 in dev
       wsUrl = `ws://${window.location.hostname}:5000/yjs`;
     } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       wsUrl = `${protocol}//${window.location.host}/yjs`;
     }
+
     const roomName = `${workspaceId}:${activeFileId}`;
 
     // 3. Connect WebsocketProvider
@@ -53,16 +79,18 @@ export function useYjsMonaco({
     });
     providerRef.current = provider;
 
-    // 4. Set Awareness user presence (remote cursor, name, color)
-    const userColor = user?.avatarColor || '#6366F1';
+    // 4. Set Awareness user presence
+    const currentUser = userRef.current;
+    const currentRole = userRoleRef.current || 'editor';
+    const userColor = currentUser?.avatarColor || '#6366F1';
+
     provider.awareness.setLocalStateField('user', {
-      name: user?.name || 'Developer',
+      name: currentUser?.name || 'Developer',
       color: userColor,
       colorLight: `${userColor}33`,
-      role: userRole,
+      role: currentRole,
     });
 
-    // Awareness change listener
     const handleAwarenessChange = () => {
       const states = provider.awareness.getStates();
       const activeCollaborators = [];
@@ -76,45 +104,82 @@ export function useYjsMonaco({
         }
       });
 
-      if (onRemoteUsersChange) {
-        onRemoteUsersChange(activeCollaborators);
+      if (onRemoteUsersChangeRef.current) {
+        onRemoteUsersChangeRef.current(activeCollaborators);
       }
     };
 
     provider.awareness.on('change', handleAwarenessChange);
 
-    // Sync status listeners
-    provider.on('status', (event) => {
-      if (event.status === 'connected') {
-        setConnecting(false);
-        setSynced(true);
-      } else {
-        setSynced(false);
-      }
-    });
-
-    provider.on('sync', (isSynced) => {
-      setSynced(isSynced);
-      setConnecting(false);
-    });
-
-    // 5. Bind Monaco Editor to Y.Text
+    // 5. Safe MonacoBinding Attachment
+    // Do NOT bind an empty Y.Doc immediately if the editor model already has content!
     const yText = ydoc.getText('monaco');
-    const model = editor.getModel();
+    let isBound = false;
 
-    if (model) {
-      const binding = new MonacoBinding(
+    const bindEditor = () => {
+      if (isBound) return;
+      const model = editor.getModel();
+      if (!model || model.isDisposed()) return;
+
+      // If Yjs is currently empty but the local model already has text (from DB or starter code),
+      // seed Y.Text with local text so MonacoBinding will NEVER wipe the editor with an empty string!
+      if (yText.length === 0 && model.getValue().length > 0) {
+        ydoc.transact(() => {
+          if (yText.length === 0) {
+            yText.insert(0, model.getValue());
+          }
+        });
+      }
+
+      bindingRef.current = new MonacoBinding(
         yText,
         model,
         new Set([editor]),
         provider.awareness
       );
-      bindingRef.current = binding;
+      isBound = true;
+    };
+
+    // Listen to sync events from the server
+    const handleSync = (isSynced) => {
+      if (isSynced) {
+        setSynced(true);
+        setConnecting(false);
+        bindEditor();
+      }
+    };
+
+    provider.on('sync', handleSync);
+
+    provider.on('status', (event) => {
+      if (event.status === 'connected') {
+        setConnecting(false);
+      } else if (event.status === 'disconnected') {
+        setSynced(false);
+      }
+    });
+
+    // If already synced synchronously (e.g. cached), bind immediately
+    if (provider.synced) {
+      setSynced(true);
+      setConnecting(false);
+      bindEditor();
     }
 
-    // Cleanup on file switch or unmount
+    // Fallback: If server sync takes more than 600ms or is offline,
+    // bind with existing editor content so typing is never blocked and text never disappears
+    const fallbackTimer = setTimeout(() => {
+      if (!isBound) {
+        bindEditor();
+      }
+    }, 600);
+
+    // Cleanup on activeFileId change or unmount
     return () => {
+      clearTimeout(fallbackTimer);
       provider.awareness.off('change', handleAwarenessChange);
+      provider.off('sync', handleSync);
+
       if (bindingRef.current) {
         bindingRef.current.destroy();
         bindingRef.current = null;
@@ -128,7 +193,7 @@ export function useYjsMonaco({
         ydocRef.current = null;
       }
     };
-  }, [workspaceId, activeFileId, editor, user, userRole, onRemoteUsersChange]);
+  }, [workspaceId, activeFileId, editor]);
 
   return {
     synced,

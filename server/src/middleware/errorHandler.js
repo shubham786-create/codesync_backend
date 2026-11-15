@@ -3,9 +3,9 @@ export function errorHandler(err, req, res, next) {
 
   // Mongoose duplicate key error (e.g. unique email)
   if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
+    const field = err.keyValue ? Object.keys(err.keyValue)[0] : 'record';
     return res.status(409).json({
-      error: `An account with that ${field} already exists.`,
+      error: `A record with that ${field} already exists.`,
     });
   }
 

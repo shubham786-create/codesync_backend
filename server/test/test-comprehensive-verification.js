@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import * as Y from 'yjs';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import dotenv from 'dotenv';
+dotenv.config();
 import { connectDB } from '../src/config/db.js';
 import { User } from '../src/models/User.js';
 import { Workspace } from '../src/models/Workspace.js';

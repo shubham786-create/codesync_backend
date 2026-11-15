@@ -31,9 +31,16 @@ export function useYjsMonaco({
     ydocRef.current = ydoc;
 
     // 2. Determine WebSocket URL
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // In dev Vite proxy routes /yjs to localhost:5000; in prod it's on same origin or backend host
-    const wsUrl = `${protocol}//${window.location.host}/yjs`;
+    const backendUrl = import.meta.env.VITE_BACKEND_URL;
+    let wsUrl;
+    if (backendUrl) {
+      const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:';
+      const cleanHost = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      wsUrl = `${wsProtocol}//${cleanHost}/yjs`;
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl = `${protocol}//${window.location.host}/yjs`;
+    }
     const roomName = `${workspaceId}:${activeFileId}`;
 
     // 3. Connect WebsocketProvider

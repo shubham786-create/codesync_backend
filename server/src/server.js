@@ -1,4 +1,6 @@
 import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -13,6 +15,10 @@ import { initYjsServer } from './services/yjsServer.js';
 import { initSocketServer } from './services/socketServer.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDistPath = path.resolve(__dirname, '../../client/dist');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -52,6 +58,22 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/workspaces', workspaceRoutes);
 app.post('/api/invitations/accept/:token', requireAuth, acceptInvitation);
+
+// Serve static frontend in production if built
+app.use(express.static(clientDistPath));
+
+app.get('*', (req, res, next) => {
+  if (
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/socket.io') ||
+    req.path.startsWith('/yjs')
+  ) {
+    return next();
+  }
+  res.sendFile(path.join(clientDistPath, 'index.html'), (err) => {
+    if (err) next();
+  });
+});
 
 // Centralized Error Handler
 app.use(errorHandler);

@@ -4,7 +4,8 @@ let socket = null;
 
 export function getSocket() {
   if (!socket) {
-    socket = io('/', {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+    socket = io(backendUrl || '/', {
       withCredentials: true,
       autoConnect: false,
       reconnectionAttempts: 10,

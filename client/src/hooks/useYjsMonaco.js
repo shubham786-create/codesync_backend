@@ -37,6 +37,9 @@ export function useYjsMonaco({
       const wsProtocol = backendUrl.startsWith('https') ? 'wss:' : 'ws:';
       const cleanHost = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
       wsUrl = `${wsProtocol}//${cleanHost}/yjs`;
+    } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      // Connect directly to backend port 5000 to eliminate Vite's dev-server WebSocket proxy errors
+      wsUrl = `ws://${window.location.hostname}:5000/yjs`;
     } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       wsUrl = `${protocol}//${window.location.host}/yjs`;

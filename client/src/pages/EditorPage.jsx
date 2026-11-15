@@ -100,8 +100,19 @@ export default function EditorPage() {
   // Handle Run Preview
   const handleRunPreview = useCallback(() => {
     try {
+      const currentEditorValue = editorInstanceRef.current
+        ? editorInstanceRef.current.getValue()
+        : null;
+
+      const updatedFiles = files.map((f) => {
+        if ((f.id || f._id) === activeFileId && currentEditorValue !== null) {
+          return { ...f, content: currentEditorValue };
+        }
+        return f;
+      });
+
       const preferredHtml = activeFile?.name?.endsWith('.html') ? activeFile.name : 'index.html';
-      const bundledHtml = bundlePreview(files, preferredHtml);
+      const bundledHtml = bundlePreview(updatedFiles, preferredHtml);
       if (iframeRef.current) {
         iframeRef.current.srcdoc = bundledHtml;
       }
@@ -109,7 +120,7 @@ export default function EditorPage() {
     } catch (err) {
       toast.error(err.message || 'Failed to generate preview');
     }
-  }, [files, activeFile]);
+  }, [files, activeFile, activeFileId]);
 
   // PostMessage listener for sandboxed console logs
   useEffect(() => {
@@ -438,8 +449,11 @@ export default function EditorPage() {
     if (!activeFileId || !activeFile) return;
     setSaveStatus('saving');
     try {
+      const currentContent = editorInstanceRef.current
+        ? editorInstanceRef.current.getValue()
+        : activeFile.content || '';
       await workspaceService.updateFile(workspaceId, activeFileId, {
-        content: activeFile.content || '',
+        content: currentContent,
       });
       setDirtyFiles((prev) => {
         const next = { ...prev };
@@ -633,9 +647,10 @@ export default function EditorPage() {
           <div className="flex-1 relative overflow-hidden">
             {activeFile ? (
               <CodeEditor
-                value={activeFile.content || ''}
+                key={activeFileId}
+                path={activeFile.path || activeFile.name}
+                defaultValue={activeFile.content || ''}
                 language={activeFile.extension || 'javascript'}
-                onChange={handleContentChange}
                 onSave={handleManualSave}
                 onCursorChange={setCursorPos}
                 onEditorMount={(editor, monaco) => {

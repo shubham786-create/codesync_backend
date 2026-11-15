@@ -1,11 +1,11 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { Loader2 } from 'lucide-react';
 
 export default function CodeEditor({
-  value = '',
+  path = '',
+  defaultValue = '',
   language = 'javascript',
-  onChange,
   onSave,
   onCursorChange,
   onEditorMount,
@@ -88,11 +88,12 @@ export default function CodeEditor({
   return (
     <div className="w-full h-full relative overflow-hidden bg-[#090d16]">
       <Editor
+        key={path || 'editor'}
+        path={path || 'model'}
         height="100%"
         width="100%"
         language={resolveLanguage(language)}
-        value={value}
-        onChange={onChange}
+        defaultValue={defaultValue}
         onMount={handleEditorDidMount}
         loading={
           <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">

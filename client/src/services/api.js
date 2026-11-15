@@ -1,7 +1,15 @@
 import axios from 'axios';
 
-const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
-const baseURL = backendUrl ? `${backendUrl.replace(/\/$/, '')}/api` : '/api';
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+let baseURL = '/api';
+if (backendUrl) {
+  baseURL = `${backendUrl.replace(/\/$/, '')}/api`;
+} else if (
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+) {
+  baseURL = `http://${window.location.hostname}:5000/api`;
+}
 
 const api = axios.create({
   baseURL,

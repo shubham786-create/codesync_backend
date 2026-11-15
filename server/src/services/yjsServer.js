@@ -67,8 +67,8 @@ export function initYjsServer(httpServer) {
       // Extract docName: pathname can be /yjs/:docName or query ?doc=... or ?room=...
       let docName = url.searchParams.get('room') || url.searchParams.get('doc');
       if (!docName) {
-        const parts = url.pathname.replace(/^\/yjs\/?/, '').split('/');
-        docName = parts[0];
+        const rawPath = url.pathname.replace(/^\/yjs\/?/, '');
+        docName = decodeURIComponent(rawPath).split('/')[0];
       }
 
       if (!docName) {

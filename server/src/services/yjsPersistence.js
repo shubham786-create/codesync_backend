@@ -6,14 +6,33 @@ import { WorkspaceFile } from '../models/WorkspaceFile.js';
 // Debounce timer map: docName -> timeout handle
 const debounceTimers = new Map();
 
-// Helper to parse workspaceId and fileId from docName
+// Helper to parse workspaceId and fileId from docName safely
 export function parseDocName(docName) {
-  // Format: "workspaceId:fileId" or "workspaceId/fileId"
-  const parts = docName.split(/[:/]/);
-  if (parts.length >= 2) {
-    return { workspaceId: parts[0], fileId: parts[1] };
+  if (!docName) return { workspaceId: null, fileId: null };
+
+  try {
+    // Decode in case it's URL encoded (e.g. %3A for colon)
+    let clean = decodeURIComponent(docName).trim().replace(/^\/+/, '');
+    // Strip any leading 'yjs/' prefix
+    clean = clean.replace(/^yjs\//, '');
+
+    const parts = clean.split(/[:/]/);
+    if (parts.length >= 2) {
+      const wsId = parts[0].trim();
+      const fId = parts[1].trim();
+      return {
+        workspaceId: mongoose.Types.ObjectId.isValid(wsId) ? wsId : null,
+        fileId: mongoose.Types.ObjectId.isValid(fId) ? fId : null,
+      };
+    }
+
+    return {
+      workspaceId: null,
+      fileId: mongoose.Types.ObjectId.isValid(clean) ? clean : null,
+    };
+  } catch (err) {
+    return { workspaceId: null, fileId: null };
   }
-  return { workspaceId: null, fileId: docName };
 }
 
 export const mongoYjsPersistence = {
@@ -23,7 +42,9 @@ export const mongoYjsPersistence = {
    */
   async bindState(docName, ydoc) {
     const { workspaceId, fileId } = parseDocName(docName);
-    if (!fileId) return;
+    if (!fileId) {
+      return;
+    }
 
     try {
       // 1. Try to load existing binary CRDT state
@@ -35,29 +56,31 @@ export const mongoYjsPersistence = {
 
       // 2. Fallback: Seed from WorkspaceFile plain-text content
       const file = await WorkspaceFile.findById(fileId);
-      if (file && file.content) {
+      if (file && typeof file.content === 'string') {
         const ytext = ydoc.getText('monaco');
         ydoc.transact(() => {
-          if (ytext.length === 0) {
+          if (ytext.length === 0 && file.content.length > 0) {
             ytext.insert(0, file.content);
           }
         });
 
         // Save initial binary state
-        const initialBinary = Buffer.from(Y.encodeStateAsUpdate(ydoc));
-        await CollaborativeDocument.findOneAndUpdate(
-          { fileId },
-          {
-            workspaceId: file.workspaceId,
-            fileId: file._id,
-            yjsState: initialBinary,
-            lastSavedAt: new Date(),
-          },
-          { upsert: true, new: true }
-        );
+        if (file.content.length > 0) {
+          const initialBinary = Buffer.from(Y.encodeStateAsUpdate(ydoc));
+          await CollaborativeDocument.findOneAndUpdate(
+            { fileId },
+            {
+              workspaceId: file.workspaceId,
+              fileId: file._id,
+              yjsState: initialBinary,
+              lastSavedAt: new Date(),
+            },
+            { upsert: true, new: true }
+          );
+        }
       }
     } catch (err) {
-      console.error(`[Yjs Persistence] bindState failed for ${docName}:`, err);
+      console.error(`[Yjs Persistence] bindState error for ${docName}:`, err.message);
     }
 
     // Attach debounced auto-save listener on every doc update
@@ -91,25 +114,24 @@ export const mongoYjsPersistence = {
       const binaryState = Buffer.from(Y.encodeStateAsUpdate(ydoc));
       const plainText = ydoc.getText('monaco').toString();
 
-      // Upsert CollaborativeDocument
-      await CollaborativeDocument.findOneAndUpdate(
-        { fileId },
-        {
-          workspaceId,
-          fileId,
-          yjsState: binaryState,
-          lastSavedAt: new Date(),
-          $inc: { version: 1 },
-        },
-        { upsert: true }
-      );
-
-      // Mirror plain-text in WorkspaceFile for quick file explorer & preview access
-      await WorkspaceFile.findByIdAndUpdate(fileId, {
-        content: plainText,
-      });
+      await Promise.all([
+        CollaborativeDocument.findOneAndUpdate(
+          { fileId },
+          {
+            ...(workspaceId && { workspaceId }),
+            fileId,
+            yjsState: binaryState,
+            lastSavedAt: new Date(),
+            $inc: { version: 1 },
+          },
+          { upsert: true }
+        ),
+        WorkspaceFile.findByIdAndUpdate(fileId, {
+          content: plainText,
+        }),
+      ]);
     } catch (err) {
-      console.error(`[Yjs Persistence] writeState failed for ${docName}:`, err);
+      console.error(`[Yjs Persistence] writeState error for ${docName}:`, err.message);
     }
   },
 };

@@ -1,7 +1,7 @@
 import { Workspace } from '../models/Workspace.js';
 import { WorkspaceMember } from '../models/WorkspaceMember.js';
 import { WorkspaceFile } from '../models/WorkspaceFile.js';
-import { DEFAULT_FILES } from '../../../shared/index.js';
+import { DEFAULT_FILES } from '../../shared/index.js';
 
 export async function listWorkspaces(req, res, next) {
   try {
